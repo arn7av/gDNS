@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 
 from twisted.names import dns
+from io import BytesIO
+from binascii import unhexlify
+
+
+TXT_SPLIT_BY_LENGTH = True
 
 
 class SimpleRecord(dns.SimpleRecord):
@@ -14,7 +19,9 @@ class Record_A(dns.Record_A):
 
 
 class Record_A6(dns.Record_A6):
-    pass
+    def decodeJSON(self, data):
+        prefix_len, suffix, prefix = data.split()
+        self.__init__(int(prefix_len), suffix, prefix, ttl=self.ttl)
 
 
 class Record_AAAA(dns.Record_AAAA):
@@ -23,7 +30,15 @@ class Record_AAAA(dns.Record_AAAA):
 
 
 class Record_AFSDB(dns.Record_AFSDB):
-    pass
+    def decodeJSON(self, data):
+        # 65535, -> "\\# 3 ffff00"
+        # 65535, a -> "\\# 5 ffff016100"
+        # 65535, ... -> "\\# 7 ffff032e2e2e00"
+        _, hexstr = data.rsplit(maxsplit=1)
+        data_bytes = unhexlify(hexstr)
+        strio = BytesIO(data_bytes)
+        self.__init__(ttl=self.ttl)
+        self.decode(strio)
 
 
 class Record_CNAME(dns.Record_CNAME, SimpleRecord):
@@ -57,7 +72,9 @@ class Record_MG(dns.Record_MG, SimpleRecord):
 
 
 class Record_MINFO(dns.Record_MINFO):
-    pass
+    def decodeJSON(self, data):
+        rmailbx, emailbx = data.split()
+        self.__init__(rmailbx, emailbx, ttl=self.ttl)
 
 
 class Record_MR(dns.Record_MR, SimpleRecord):
@@ -71,7 +88,8 @@ class Record_MX(dns.Record_MX):
 
 
 class Record_NAPTR(dns.Record_NAPTR):
-    pass
+    def decodeJSON(self, data):
+        raise ValueError
 
 
 class Record_NS(dns.Record_NS, SimpleRecord):
@@ -88,7 +106,9 @@ class Record_PTR(dns.Record_PTR, SimpleRecord):
 
 
 class Record_RP(dns.Record_RP):
-    pass
+    def decodeJSON(self, data):
+        mbox, txt = data.split()
+        self.__init__(mbox, txt, ttl=self.ttl)
 
 
 class Record_SOA(dns.Record_SOA):
@@ -105,13 +125,19 @@ class Record_SRV(dns.Record_SRV):
 
 class Record_TXT(dns.Record_TXT):
     def decodeJSON(self, data):
-        l = data.split('"')[1::2]
+        if TXT_SPLIT_BY_LENGTH:
+            s = data[:-1]
+            l = [s[i+1:i+256] for i in range(0, len(s), 257)]
+        else:
+            l = data[1:-1].split('""')
         l_bytes = [i.encode('utf-8') for i in l]
         self.__init__(*l_bytes, ttl=self.ttl)
 
 
 class Record_WKS(dns.Record_WKS):
-    pass
+    def decodeJSON(self, data):
+        address, protocol, bitmap = data.split(maxsplit=2)
+        self.__init__(address, int(protocol), bitmap.encode('utf-8'), ttl=self.ttl)
 
 
 class UnknownRecord(dns.UnknownRecord):
@@ -125,7 +151,7 @@ class Record_SPF(dns.Record_SPF, Record_TXT):
 
 RECORD_CLASSES = {
     'Record_A': Record_A,
-    'Record_A6': Record_A6,
+    # 'Record_A6': Record_A6,
     'Record_AAAA': Record_AAAA,
     'Record_AFSDB': Record_AFSDB,
     'Record_CNAME': Record_CNAME,

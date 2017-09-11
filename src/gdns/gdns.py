@@ -5,7 +5,7 @@ import sys
 import argparse
 import signal
 
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 
 TORNADO_AVAILABLE = True
 
@@ -15,18 +15,22 @@ TORNADO_AVAILABLE = True
 # kqueue on Mac OS X and select on everywhere else. I think Tornado's choice
 # is better than Twisted. So we try to use Tornado IOLoop first, and use Twisted
 # default reactor as fallback.
+
 try:
+    # noinspection PyUnresolvedReferences
     import tornado.ioloop
+    # noinspection PyUnresolvedReferences
     import tornado.platform.twisted
 
     tornado.platform.twisted.install()
 except ImportError:
     TORNADO_AVAILABLE = False
 
-from twisted.internet import reactor, defer, error
-from twisted.names import dns, server, cache, common
+from twisted.internet import reactor, defer, error, task
+from twisted.names import dns, server, common
 from twisted.python import log, failure
-from rr import RECORD_TYPES, UnknownRecord
+from rr import RECORD_TYPES
+from patches import apply_patches
 
 import requests
 from requests_toolbelt.adapters.host_header_ssl import HostHeaderSSLAdapter
@@ -36,28 +40,72 @@ if not (version_parts[0] == 3 and version_parts[1] >= 4):
     print("python 3.4 required")
     sys.exit(1)
 
+apply_patches()
+
 DEFAULT_LOCAL_ADDRESS = '127.0.0.1'
 # DEFAULT_LOCAL_PORT = 53
 DEFAULT_LOCAL_PORT = 1053
 
+# dns.google.com
+# https://dns.google.com/resolve?name=dns.google.com&edns_client_subnet=0.0.0.0/0
+google_dns_host = 'dns.google.com'
+google_dns_ip_pool = [
+    '172.217.27.14',
+    '172.217.27.46',
+    '172.217.24.110',
+    '74.125.24.100',
+    '74.125.68.100',
+    '74.125.130.100',
+    '74.125.200.100',
+    '216.58.203.238',
+    '216.58.220.46',
+    '216.58.221.78',
+]
+google_dns_ip = google_dns_ip_pool[0]
+edns_client_subnet = None
+# edns_client_subnet = '0.0.0.0/0'
+validate_dnssec = False
 
-def get_dns_json(query_name, query_type):
+
+def get_dns_json(query_name, query_type, edns_client_subnet=edns_client_subnet, validate_dnssec=validate_dnssec):
     s = requests.Session()
     s.mount('https://', HostHeaderSSLAdapter())
-    j = s.get('https://216.58.220.46/resolve', params={'name': query_name, 'type': query_type}, headers={'host': 'dns.google.com'}).json()
-    log.msg(j)
-    return j
+    u = 'https://{}/resolve'.format(google_dns_ip)
+    params = {'name': query_name, 'type': query_type, 'cd': validate_dnssec}
+    if edns_client_subnet:
+        params['edns_client_subnet'] = edns_client_subnet
+    try:
+        j = s.get(u, params=params, headers={'host': google_dns_host}).json()
+    except requests.exceptions.RequestException as e:
+        # log.debug(e.__class__.__name__)
+        pass
+    else:
+        log.msg(j)
+        return j
 
 
-def json_name_to_bytes(s):
-    return s.encode('ascii').decode('idna').encode('utf-8')
+def resolve_google_dns_ip():
+    j = get_dns_json(google_dns_host, dns.A)
+    if not j:
+        return
+    a = j.get('Answer', [])
+    if len(a) > 0:
+        return a[0].get('data', None)
+
+
+def json_name_to_dns_name(s):
+    # if names are going to be valid regardless
+    return s.encode('ascii')
+    # if we want our patched Name to handle edge cases
+    # return s.encode('ascii').decode('idna')
+
+
+def bytes_to_json_name(b):
+    return b.decode('utf-8').encode('idna').decode('ascii')
 
 
 class JSONMessage(dns.Message):
     _recordTypes = RECORD_TYPES
-
-    def lookupRecordType(self, type):
-        return self._recordTypes.get(type, UnknownRecord)
 
     def fromJSON(self, j):
         self.maxSize = 0
@@ -73,7 +121,7 @@ class JSONMessage(dns.Message):
 
         self.queries = []
         for q in j['Question']:
-            self.queries.append(dns.Query(json_name_to_bytes(q['name']), q['type']))
+            self.queries.append(dns.Query(json_name_to_dns_name(q['name']), q['type']))
 
         items = (
             (self.answers, j.get('Answer', [])),
@@ -87,7 +135,7 @@ class JSONMessage(dns.Message):
     def parseRecordsJSON(self, item, records):
         for record in records:
             header = dns.RRHeader(
-                name=json_name_to_bytes(record['name']),
+                name=json_name_to_dns_name(record['name']),
                 type=record['type'],
                 ttl=record.get('TTL', 0),
                 auth=self.auth
@@ -101,32 +149,41 @@ class JSONMessage(dns.Message):
 
 
 def getParsedMessage(query, timeout=None):
-    query_name = query.name.name
+    query_name = query.name.name  # unicode_sample = b'\xe0\xa4\xad\xe0\xa4\xbe\xe0\xa4\xb0\xe0\xa4\xa4.icom.museum'
     query_type = query.type
     if isinstance(query_name, bytes):
-        query_name_unicode = query_name.decode('utf-8')
-        query_name_idna = query_name_unicode.encode('idna')
+        query_name_idna = bytes_to_json_name(query_name)
     else:
         query_name_idna = query_name
     j = get_dns_json(query_name_idna, query_type)
-    m = JSONMessage()
-    m.fromJSON(j)
-    return m
+    d = defer.Deferred()
+    if j:
+        m = JSONMessage()
+        m.fromJSON(j)
+        # return m
+        d.callback(m)
+    else:
+        f = failure.Failure(ConnectionError('unable to fetch dns'))
+        d.errback(f)
+    return d
 
 
 class GoogleResolver(common.ResolverBase):
 
-    def __init__(self, query_timeout=None, verbose=0):
+    def __init__(self, query_timeout=None, verbose=0, reactor=None):
         common.ResolverBase.__init__(self)
+
+        if reactor is None:
+            from twisted.internet import reactor
+        self._reactor = reactor
+
         self.timeout = query_timeout
         self.verbose = verbose
         self._waiting = {}
 
     def queryGoogle(self, queries, timeout=None):
-        d = defer.Deferred()
-        d.addCallback(getParsedMessage, timeout=timeout)
         query = queries[0]
-        d.callback(query)
+        d = task.deferLater(self._reactor, 0, getParsedMessage, query, timeout=timeout)
         return d
 
     def _lookup(self, name, cls, type, timeout):
@@ -138,8 +195,8 @@ class GoogleResolver(common.ResolverBase):
             d = self.queryGoogle([dns.Query(name, type, cls)], timeout)
 
             def cbResult(result):
-                for d in self._waiting.pop(key):
-                    d.callback(result)
+                for d_waiting in self._waiting.pop(key):
+                    d_waiting.callback(result)
                 return result
             d.addCallback(self.filterAnswers)
             d.addBoth(cbResult)
@@ -151,8 +208,8 @@ class GoogleResolver(common.ResolverBase):
     def filterAnswers(self, message):
         # if message.trunc:
         #     pass
-        if message.rCode != dns.OK:
-            return failure.Failure(self.exceptionForCode(message.rCode)(message))
+        # if message.rCode != dns.OK:
+        #     return failure.Failure(self.exceptionForCode(message.rCode)(message))
         return (message.answers, message.authority, message.additional)
 
 
@@ -162,6 +219,8 @@ def try_exit_tornado_ioloop():
 
 
 def main():
+    global google_dns_ip
+
     parser = argparse.ArgumentParser(
         description="Google DNS-over-HTTPS")
     parser.add_argument('-b', '--bind-addr', type=str,
@@ -188,6 +247,10 @@ def main():
     parser.add_argument('-V', '--version',
                         action='version',
                         version="gdns " + str(__version__))
+    parser.add_argument('-G', '--google-dns-ip', type=str,
+                        help='dns.google.com ip',
+                        default=google_dns_ip,
+                        )
 
     args = parser.parse_args()
     if not args.quiet:
@@ -195,7 +258,15 @@ def main():
 
     addr = args.bind_addr
     port = args.bind_port
-    log.msg("Listening on " + addr + ':' + str(port))
+    log.msg('Listening on ' + addr + ':' + str(port))
+
+    google_dns_ip = args.google_dns_ip
+    fresh_google_dns_ip = resolve_google_dns_ip()
+    if fresh_google_dns_ip:
+        google_dns_ip = fresh_google_dns_ip
+    else:
+        log.err(ConnectionError('unable to refresh dns.google.com ip'))
+    log.msg('dns.google.com ip ' + google_dns_ip)
 
     factory = server.DNSServerFactory(
         clients=[GoogleResolver(query_timeout=args.query_timeout, verbose=args.verbosity)],
