@@ -20,7 +20,7 @@ class Record_A(dns.Record_A):
 
 class Record_A6(dns.Record_A6):
     def decodeJSON(self, data):
-        prefix_len, suffix, prefix = data.split()
+        prefix_len, suffix, prefix = data.split(' ')
         self.__init__(int(prefix_len), suffix, prefix, ttl=self.ttl)
 
 
@@ -34,7 +34,7 @@ class Record_AFSDB(dns.Record_AFSDB):
         # 65535, -> "\\# 3 ffff00"
         # 65535, a -> "\\# 5 ffff016100"
         # 65535, ... -> "\\# 7 ffff032e2e2e00"
-        _, hexstr = data.rsplit(maxsplit=1)
+        _, hexstr = data.rsplit(' ', maxsplit=1)
         data_bytes = unhexlify(hexstr)
         strio = BytesIO(data_bytes)
         self.__init__(ttl=self.ttl)
@@ -51,7 +51,7 @@ class Record_DNAME(dns.Record_DNAME, SimpleRecord):
 
 class Record_HINFO(dns.Record_HINFO):
     def decodeJSON(self, data):
-        cpu, os = data.split(maxsplit=1)
+        cpu, os = data.split(' ', maxsplit=1)
         self.__init__(cpu.encode('utf-8'), os.encode('utf-8'), ttl=self.ttl)
 
 
@@ -73,7 +73,7 @@ class Record_MG(dns.Record_MG, SimpleRecord):
 
 class Record_MINFO(dns.Record_MINFO):
     def decodeJSON(self, data):
-        rmailbx, emailbx = data.split()
+        rmailbx, emailbx = data.split(' ')
         self.__init__(rmailbx, emailbx, ttl=self.ttl)
 
 
@@ -83,13 +83,23 @@ class Record_MR(dns.Record_MR, SimpleRecord):
 
 class Record_MX(dns.Record_MX):
     def decodeJSON(self, data):
-        preference, name = data.split()
+        preference, name = data.split(' ')
         self.__init__(int(preference), name, ttl=self.ttl)
 
 
 class Record_NAPTR(dns.Record_NAPTR):
     def decodeJSON(self, data):
-        raise ValueError
+        normal_split = data.split(' ')
+        if len(normal_split) == 6:
+            order, preference, flags, service, regexp, replacement = normal_split
+        else:
+            order, preference, remain = data.split(' ', maxsplit=2)
+            remain, replacement = remain.rsplit(' ', maxsplit=1)
+            flags, service, regexp = remain.rsplit(' ', maxsplit=2)  # Totally fails if regexp has spaces. No possible workaround!
+        flags = flags.encode('utf-8')
+        service = service.encode('utf-8')
+        regexp = regexp.encode('utf-8')
+        self.__init__(int(order), int(preference), flags, service, regexp, replacement, ttl=self.ttl)
 
 
 class Record_NS(dns.Record_NS, SimpleRecord):
@@ -107,19 +117,19 @@ class Record_PTR(dns.Record_PTR, SimpleRecord):
 
 class Record_RP(dns.Record_RP):
     def decodeJSON(self, data):
-        mbox, txt = data.split()
+        mbox, txt = data.split(' ')
         self.__init__(mbox, txt, ttl=self.ttl)
 
 
 class Record_SOA(dns.Record_SOA):
     def decodeJSON(self, data):
-        mname, rname, serial, refresh, retry, expire, minimum = data.split()
+        mname, rname, serial, refresh, retry, expire, minimum = data.split(' ')
         self.__init__(mname, rname, int(serial), int(refresh), int(retry), int(expire), int(minimum), ttl=self.ttl)
 
 
 class Record_SRV(dns.Record_SRV):
     def decodeJSON(self, data):
-        priority, weight, port, target = data.split()
+        priority, weight, port, target = data.split(' ')
         self.__init__(int(priority), int(weight), int(port), target, ttl=self.ttl)
 
 
@@ -136,7 +146,7 @@ class Record_TXT(dns.Record_TXT):
 
 class Record_WKS(dns.Record_WKS):
     def decodeJSON(self, data):
-        address, protocol, bitmap = data.split(maxsplit=2)
+        address, protocol, bitmap = data.split(' ', maxsplit=2)
         self.__init__(address, int(protocol), bitmap.encode('utf-8'), ttl=self.ttl)
 
 
@@ -151,7 +161,7 @@ class Record_SPF(dns.Record_SPF, Record_TXT):
 
 RECORD_CLASSES = {
     'Record_A': Record_A,
-    # 'Record_A6': Record_A6,
+    'Record_A6': Record_A6,
     'Record_AAAA': Record_AAAA,
     'Record_AFSDB': Record_AFSDB,
     'Record_CNAME': Record_CNAME,

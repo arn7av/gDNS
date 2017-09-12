@@ -5,7 +5,7 @@ import sys
 import argparse
 import signal
 
-__version__ = '0.0.2'
+__version__ = '0.1.0'
 
 TORNADO_AVAILABLE = True
 
@@ -50,9 +50,12 @@ DEFAULT_LOCAL_PORT = 1053
 # https://dns.google.com/resolve?name=dns.google.com&edns_client_subnet=0.0.0.0/0
 google_dns_host = 'dns.google.com'
 google_dns_ip_pool = [
+    '172.217.24.110',
+    '172.217.26.78',
     '172.217.27.14',
     '172.217.27.46',
-    '172.217.24.110',
+    '172.217.27.110',
+    '173.194.202.100',
     '74.125.24.100',
     '74.125.68.100',
     '74.125.130.100',
