@@ -1,4 +1,4 @@
-tornado
 Twisted
+tornado
 requests
 requests-toolbelt

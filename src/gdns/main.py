@@ -1,11 +1,12 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
 import sys
 import argparse
 import signal
 
-__version__ = '0.1.1'
+__version__ = '0.1.2'
 
 TORNADO_AVAILABLE = True
 
@@ -35,12 +36,8 @@ from gdns.patches import apply_patches
 import requests
 from requests_toolbelt.adapters.host_header_ssl import HostHeaderSSLAdapter
 
-version_parts = sys.version_info
-if not (version_parts[0] == 3 and version_parts[1] >= 4):
-    print("python 3.4 required")
-    sys.exit(1)
-
 apply_patches()
+
 
 DEFAULT_LOCAL_ADDRESS = '127.0.0.1'
 # DEFAULT_LOCAL_PORT = 53

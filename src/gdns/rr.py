@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function, unicode_literals
 
-from twisted.names import dns
 from io import BytesIO
 from binascii import unhexlify
+
+from twisted.names import dns
 
 
 TXT_SPLIT_BY_LENGTH = True

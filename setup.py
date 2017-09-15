@@ -5,7 +5,7 @@ from os.path import abspath, dirname, join
 from setuptools import setup, find_packages
 from sys import version_info, path as sys_path
 
-deps = ['tornado', 'Twisted', 'requests', 'requests-toolbelt']
+deps = ['Twisted', 'tornado', 'requests', 'requests-toolbelt']
 
 # When we build an egg for the Windows bootstrap we don't want dependency
 # information built into it.
@@ -17,7 +17,7 @@ sys_path.insert(0, srcdir)
 
 setup(
     name='gDNS',
-    version='0.1.1',
+    version='0.1.2',
     description='Google DNS-over-HTTPS',
     url='https://github.com/arn7av/gDNS',
     download_url='https://github.com/arn7av/gDNS/archive/0.1.tar.gz',
@@ -29,5 +29,6 @@ setup(
       'console_scripts': ['gdns=gdns.main:main']
     },
     install_requires=deps,
+    python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, <4',
     classifiers=[],
 )
