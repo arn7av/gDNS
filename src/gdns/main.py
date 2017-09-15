@@ -5,7 +5,7 @@ import sys
 import argparse
 import signal
 
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 
 TORNADO_AVAILABLE = True
 
@@ -29,8 +29,8 @@ except ImportError:
 from twisted.internet import reactor, defer, error, task
 from twisted.names import dns, server, common
 from twisted.python import log, failure
-from rr import RECORD_TYPES
-from patches import apply_patches
+from gdns.rr import RECORD_TYPES
+from gdns.patches import apply_patches
 
 import requests
 from requests_toolbelt.adapters.host_header_ssl import HostHeaderSSLAdapter
@@ -60,6 +60,7 @@ google_dns_ip_pool = [
     '74.125.68.100',
     '74.125.130.100',
     '74.125.200.100',
+    '74.125.204.100',
     '216.58.203.238',
     '216.58.220.46',
     '216.58.221.78',
