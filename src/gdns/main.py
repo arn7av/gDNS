@@ -5,8 +5,9 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import sys
 import argparse
 import signal
+from copy import copy
 
-__version__ = '0.1.3'
+__version__ = '0.1.4'
 
 TORNADO_AVAILABLE = True
 
@@ -22,10 +23,13 @@ try:
     import tornado.ioloop
     # noinspection PyUnresolvedReferences
     import tornado.platform.twisted
-
-    tornado.platform.twisted.install()
 except ImportError:
     TORNADO_AVAILABLE = False
+else:
+    # avoid ReactorAlreadyInstalledError when using PyInstaller
+    if 'twisted.internet.reactor' in sys.modules:
+        del sys.modules['twisted.internet.reactor']
+    tornado.platform.twisted.install()
 
 from twisted.internet import reactor, defer, error, task
 from twisted.names import dns, server, common
@@ -211,7 +215,34 @@ class GoogleResolver(common.ResolverBase):
         #     pass
         # if message.rCode != dns.OK:
         #     return failure.Failure(self.exceptionForCode(message.rCode)(message))
-        return (message.answers, message.authority, message.additional)
+        # return (message.answers, message.authority, message.additional)
+        return message
+
+
+class ExtensibleDNSServerFactory(server.DNSServerFactory):
+
+    def _generateFinalMessage(self, response_message, request_message):
+        final_message = copy(response_message)
+        final_message.id = request_message.id
+        final_message.queries = request_message.queries[:]
+        final_message.timeReceived = getattr(request_message, 'timeReceived', None)
+        return final_message
+
+    def gotResolverResponse(self, response_message, protocol, request_message, address):
+        response = self._generateFinalMessage(response_message, request_message)
+        ans, auth, add = response_message.answers, response_message.authority, response_message.additional
+        # response = self._responseFromMessage(
+        #     message=message, rCode=dns.OK,
+        #     answers=ans, authority=auth, additional=add)
+        self.sendReply(protocol, response, address)
+
+        l = len(ans) + len(auth) + len(add)
+        self._verboseLog("Lookup found %d record%s" % (l, l != 1 and "s" or ""))
+
+        if self.cache and l:
+            self.cache.cacheResult(
+                request_message.queries[0], (ans, auth, add)
+            )
 
 
 def try_exit_tornado_ioloop():
@@ -269,7 +300,7 @@ def main():
         log.err(ConnectionError('unable to refresh dns.google.com ip'))
     log.msg('dns.google.com ip ' + google_dns_ip)
 
-    factory = server.DNSServerFactory(
+    factory = ExtensibleDNSServerFactory(
         clients=[GoogleResolver(query_timeout=args.query_timeout, verbose=args.verbosity)],
         verbose=args.verbosity
     )

@@ -5,7 +5,7 @@ from os.path import abspath, dirname, join
 from setuptools import setup, find_packages
 from sys import version_info, path as sys_path
 
-gdns_version = '0.1.3'
+gdns_version = '0.1.4'
 
 deps = ['Twisted', 'tornado', 'requests', 'requests-toolbelt']
 
